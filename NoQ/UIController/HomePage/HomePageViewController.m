@@ -10,6 +10,14 @@
 #import "BadgeButton.h"
 #import "HomePageTableViewCell.h"
 
+typedef enum
+{
+    PD_Default = 0,
+    PD_AllowPullDown = 1,
+    PD_PullingDown = 3,
+    PD_Hidding = 7,
+} PullingDownState;
+
 @interface HomePageViewController ()<UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate, UIGestureRecognizerDelegate>
 // navigation bar items
 @property (nonatomic, retain) IBOutlet UITextField *naviSearchTF;
@@ -18,9 +26,9 @@
 // content
 @property (nonatomic, retain) IBOutlet UITableView *tableView;
 
-@property (nonatomic, retain) IBOutlet UIView *test;
+@property (nonatomic, retain) IBOutlet UIView *sharingView;
 // for pulling down to share
-@property (nonatomic, assign) BOOL pullFromBottom;
+@property (nonatomic, assign) PullingDownState state;
 
 @end
 
@@ -28,6 +36,7 @@
 
 - (void) dealloc
 {
+    SAFE_RELEASE(_sharingView);
     SAFE_RELEASE(_naviSearchTF);
     SAFE_RELEASE(_naviMsgBtn);
     SAFE_RELEASE(_naviCityView);
@@ -40,6 +49,7 @@
     self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
     if (self)
     {
+        _state = PD_Default;
     }
     return self;
 }
@@ -48,8 +58,7 @@
 {
     [super viewDidLoad];
     [self configNavigationBarItem];
-    [self configGestures];
-    
+    [self configGesture];
 }
 
 - (void) viewWillAppear:(BOOL) animated
@@ -71,17 +80,41 @@
     [leftBtn release];
 }
 
-- (void) configGestures
+- (void) configGesture
 {
-    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(panResponser:)];
-    pan.delegate = self;
-    [self.tableView addGestureRecognizer:pan];
-    [pan release];
+    UIPanGestureRecognizer *pg = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(panResponser:)];
+    [self.sharingView addGestureRecognizer:pg];
+    [pg release];
 }
 
 - (void) panResponser:(UIPanGestureRecognizer *) pg
 {
-    NSLog(@"1");
+    static CGFloat y = 0;
+    if (pg.state == UIGestureRecognizerStateBegan)
+    {
+        y = [pg locationInView:self.sharingView].y;
+    }
+    else if (pg.state == UIGestureRecognizerStateChanged)
+    {
+        CGFloat crtY = [pg locationInView:self.sharingView].y;
+        CGFloat delta = crtY - y;
+        CGRect tableFrame = self.tableView.frame;
+        if (delta > 0 && ADJUSTED_VIEW_FRAME.origin.y < tableFrame.origin.y+delta)
+        {
+            delta = ADJUSTED_VIEW_FRAME.origin.y - tableFrame.origin.y;
+        }
+        else if (delta < 0 && tableFrame.origin.y + delta < TOP_HIDE_VIEW_FRAME.origin.y)
+        {
+            delta = TOP_HIDE_VIEW_FRAME.origin.y - tableFrame.origin.y;
+        }
+        self.tableView.frame = CGRectOffset(tableFrame, 0, delta);
+        [self makeScaleViaScrollView:self.tableView timeInterval:0];
+        y = crtY;
+    }
+    else if (pg.state == UIGestureRecognizerStateEnded || pg.state == UIGestureRecognizerStateCancelled)
+    {
+        [self pullDownDidEndDraggingEffectWithScrollView:self.tableView];
+    }
 }
 
 - (IBAction) onClickCityBtn:(id) sender
@@ -89,13 +122,17 @@
     NSLog(@"on click city");
 }
 
-#pragma mark - UIGestureDelegate
+#pragma mark - UITextFieldDelegate
 
-- (BOOL) gestureRecognizerShouldBegin:(UIGestureRecognizer *) gestureRecognizer
+- (BOOL) textFieldShouldReturn:(UITextField *) textField
 {
-    return self.pullFromBottom;
+    if (textField.text.length > 0)
+    {
+        [self.naviSearchTF resignFirstResponder];
+        return YES;
+    }
+    return NO;
 }
-
 
 #pragma mark - UITableViewDelegate
 - (CGFloat) tableView:(UITableView *) tableView heightForRowAtIndexPath:(NSIndexPath *) indexPath
@@ -152,55 +189,116 @@
 - (void) scrollViewWillBeginDragging:(UIScrollView *) scrollView
 {
     [self.naviSearchTF resignFirstResponder];
-    NSLog(@"begin dragging");
-//    if (scrollView.contentOffset.y+ADJUSTED_VIEW_FRAME.size.height >= scrollView.contentSize.height)
-//    {
-//        self.pullFromBottom = YES;
-//    }
-//    else
-//    {
-//        self.pullFromBottom = NO;
-//    }
-}
-
-- (void) scrollViewDidEndDecelerating:(UIScrollView *) scrollView
-{
-    if (scrollView.contentOffset.y+ADJUSTED_VIEW_FRAME.size.height >= scrollView.contentSize.height)
+    if (scrollView.contentOffset.y + ADJUSTED_VIEW_FRAME.size.height >= scrollView.contentSize.height)
     {
-        self.pullFromBottom = YES;
-    }
-    else
-    {
-        self.pullFromBottom = NO;
+        self.state = PD_AllowPullDown;
     }
 }
 
 - (void) scrollViewDidEndDragging:(UIScrollView *) scrollView willDecelerate:(BOOL) decelerate
 {
-    NSLog(@"end dragging");
+    [self pullDownDidEndDraggingEffectWithScrollView:scrollView];
 }
 
 - (void) scrollViewDidScroll:(UIScrollView *) scrollView
 {
-    if (self.pullFromBottom)
+    CGFloat delta = scrollView.contentOffset.y + ADJUSTED_VIEW_FRAME.size.height - scrollView.contentSize.height;
+    if (delta > 0)
     {
-        NSLog(@"aaa");
+        [self pullDownEffectWithDelta:-delta scrollView:scrollView];
     }
-}
-
-#pragma mark - UITextFieldDelegate
-
-- (BOOL) textFieldShouldReturn:(UITextField *) textField
-{
-    if (textField.text.length > 0)
+    else
     {
-        [self.naviSearchTF resignFirstResponder];
-        return YES;
+        CGFloat delta_2 = ADJUSTED_VIEW_FRAME.origin.y - scrollView.frame.origin.y;
+        if (delta_2 > 0)
+        {
+            if (-delta < delta_2)
+            {
+                [self pullDownEffectWithDelta:-delta scrollView:scrollView];
+            }
+            else
+            {
+                [self pullDownEffectWithDelta:delta_2 scrollView:scrollView];
+            }
+        }
+        else if (delta_2 < 0)
+        {
+            if (self.state == PD_AllowPullDown)
+            {
+                self.state = PD_Default;
+            }
+        }
     }
-    return NO;
 }
 
 #pragma mark - Helper
+
+- (void) pullDownEffectWithDelta:(CGFloat) delta scrollView:(UIScrollView *) scrollView
+{
+    if (self.state & PD_AllowPullDown)
+    {
+        [scrollView setContentOffset:CGPointMake(0, scrollView.contentSize.height - ADJUSTED_VIEW_FRAME.size.height)];
+        if (scrollView.frame.origin.y + delta == ADJUSTED_VIEW_FRAME.origin.y)
+        {
+            [scrollView setFrame:ADJUSTED_VIEW_FRAME];
+        }
+        else
+        {
+            [scrollView setFrame:CGRectOffset(scrollView.frame, 0, delta)];
+            
+            [self makeScaleViaScrollView:scrollView timeInterval:0];
+        }
+    }
+}
+
+- (void) pullDownDidEndDraggingEffectWithScrollView:(UIScrollView *) scrollView
+{
+    CGFloat delta = ADJUSTED_VIEW_FRAME.origin.y - scrollView.frame.origin.y;
+    // pulling down
+    if (delta > 0)
+    {
+        // reset to bottom
+        if (delta < ADJUSTED_VIEW_FRAME.size.height/2)
+        {
+            self.state = PD_PullingDown;
+            [UIView animateWithDuration:0.5 animations:^{
+                [scrollView setFrame:ADJUSTED_VIEW_FRAME];
+            } completion:^(BOOL finished) {
+                self.state = PD_AllowPullDown;
+            }];
+        }
+        // hide
+        else
+        {
+            self.state = PD_PullingDown;
+            [UIView animateWithDuration:0.5 animations:^{
+                [scrollView setFrame:CGRectOffset(ADJUSTED_VIEW_FRAME, 0, -ADJUSTED_VIEW_FRAME.size.height)];
+            } completion:^(BOOL finished) {
+                self.state = PD_Hidding;
+            }];
+        }
+        [self makeScaleViaScrollView:scrollView timeInterval:0.5];
+    }
+    else
+    {
+        if (scrollView.contentOffset.y + ADJUSTED_VIEW_FRAME.size.height < scrollView.contentSize.height)
+        {
+            self.state = PD_Default;
+        }
+    }
+}
+
+- (void) makeScaleViaScrollView:(UIScrollView *) scrollView timeInterval:(NSTimeInterval) timeInterval
+{
+    CGFloat scaleRatio = [self calculateScaleRatioViaScrollView:scrollView];
+    [UIView animateWithDuration:timeInterval animations:^{
+        self.sharingView.transform = CGAffineTransformMakeScale(scaleRatio, scaleRatio);
+    }];
+}
+- (CGFloat) calculateScaleRatioViaScrollView:(UIScrollView *) scrollView
+{
+    return 1 - (scrollView.frame.origin.y - TOP_HIDE_VIEW_FRAME.origin.y) / (ADJUSTED_VIEW_FRAME.origin.y - TOP_HIDE_VIEW_FRAME.origin.y) * 0.2;
+}
 
 - (NSInteger) indexFromIndexPath:(NSIndexPath *) indexPath
 {

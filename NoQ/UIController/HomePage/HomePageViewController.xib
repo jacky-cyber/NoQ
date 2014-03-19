@@ -10,8 +10,8 @@
                 <outlet property="naviCityView" destination="WSx-zy-tES" id="3fE-XH-5q1"/>
                 <outlet property="naviMsgBtn" destination="Wj8-zK-mBO" id="pRu-L9-rGt"/>
                 <outlet property="naviSearchTF" destination="spQ-iD-h6n" id="Izp-QO-MSJ"/>
+                <outlet property="sharingView" destination="aeD-eB-wq4" id="48A-WC-gt6"/>
                 <outlet property="tableView" destination="NbT-eK-4zn" id="M7z-7q-79r"/>
-                <outlet property="test" destination="aeD-eB-wq4" id="JhC-vQ-AAE"/>
                 <outlet property="view" destination="i5M-Pr-FkT" id="sfx-zR-JGt"/>
             </connections>
         </placeholder>
